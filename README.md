@@ -42,3 +42,9 @@ Full policy: `00-governance/branching-policy.md` in [`educk-docs`](https://githu
 cp .env.example .env
 docker compose up -d
 ```
+
+When started, Docker Compose will:
+1. Launch PostgreSQL 16 (`educk-comm-db`) and wait for its healthcheck (`pg_isready`).
+2. Run Flyway container (`educk-comm-migration`) to apply all pending `migrations/V*__*.sql` versioned migrations.
+3. Run Seed container (`educk-comm-seed`) to populate `seeds/01_seed_test_messages.sql` idempotently.
+
