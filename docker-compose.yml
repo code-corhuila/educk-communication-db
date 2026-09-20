@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # Primary PostgreSQL instance for communication service
+  # Pattern: <abbr>-<domain>-<piece> -> educk-comm-db
+  postgres-db:
+    image: postgres:16-alpine
+    container_name: educk-comm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be defined in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be defined in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be defined in .env}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      edutrack-net:
+        aliases:
+          - educk-comm-db
+          - postgres-db
+
+  # Migration runner executing versioned Flyway migrations on every startup/deploy
+  # Solves Codex finding: executes migrations even if pgdata volume is already populated
+  flyway-migration:
+    image: flyway/flyway:10-alpine
+    container_name: educk-comm-migration
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+    command: -url=jdbc:postgresql://postgres-db:5432/${POSTGRES_DB} -user=${POSTGRES_USER} -password=${POSTGRES_PASSWORD} -connectRetries=10 migrate
+    volumes:
+      - ./migrations:/flyway/sql:ro
+    networks:
+      - edutrack-net
+
+  # Local test seed runner executed after schema migrations succeed
+  # Solves Codex finding: populates initial test seed messages automatically during compose up
+  seed-runner:
+    image: postgres:16-alpine
+    container_name: educk-comm-seed
+    depends_on:
+      flyway-migration:
+        condition: service_completed_successfully
+    entrypoint:
+      - "sh"
+      - "-c"
+      - "PGPASSWORD=$$POSTGRES_PASSWORD psql -h postgres-db -U $$POSTGRES_USER -d $$POSTGRES_DB -f /seeds/01_seed_test_messages.sql"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be defined in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be defined in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be defined in .env}
+    volumes:
+      - ./seeds:/seeds:ro
+    networks:
+      - edutrack-net
+
+volumes:
+  pgdata:
+
+networks:
+  edutrack-net:
+    driver: bridge
